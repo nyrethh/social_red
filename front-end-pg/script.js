@@ -1,9 +1,6 @@
-// script.js (VERSIÓN FINAL, UNIFICADA Y CORREGIDA)
+// script.js (VERSIÓN FINAL CON JWT Y ROLES)
 
 document.addEventListener('DOMContentLoaded', () => {
-    // ====================================================================
-    // --- CONFIGURACIÓN GLOBAL Y FUNCIONES COMUNES ---
-    // ====================================================================
     const API_BASE = 'http://localhost:4000/api';
 
     function renderEstado(estado) {
@@ -20,9 +17,109 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = `<tr><td colspan="${colspan}" class="table-state-cell"><i class="fas fa-box-open"></i><p>${message}</p></td></tr>`;
     }
 
+    // Función para obtener el token del localStorage
+    function getToken() {
+        return localStorage.getItem('token');
+    }
+
+    // Función para obtener el rol del usuario del localStorage
+    function getUserRole() {
+        return localStorage.getItem('userRole');
+    }
+
+    // Función para proteger las vistas del panel
+    function protectAdminViews() {
+        const token = getToken();
+        if (!token) {
+            window.location.href = 'index.html';
+            return;
+        }
+        const userRole = getUserRole();
+        if (userRole !== 'Admin') {
+            document.querySelectorAll('main').forEach(view => view.classList.add('hidden'));
+            const container = document.querySelector('.sidebar');
+            if (container) {
+                container.innerHTML = `
+                    <div style="padding: 20px; text-align: center;">
+                        <i class="fas fa-exclamation-triangle" style="font-size: 5rem; color: #dc3545;"></i>
+                        <p style="margin-top: 15px; font-weight: bold;">Acceso denegado. No tienes permisos de administrador.</p>
+                        <button onclick="logout()" class="btn btn-primary" style="margin-top: 20px;">Cerrar Sesión</button>
+                    </div>
+                `;
+            }
+        }
+    }
+    
+    window.logout = function() {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userRole');
+        window.location.href = 'index.html';
+    };
+
+    // Lógica para Login (si la página es index.html)
+    const loginForm = document.getElementById('login-form');
+    if (loginForm) {
+        const aliasInput = document.getElementById('login-alias');
+        const passwordInput = document.getElementById('login-password');
+        const errorMessage = document.getElementById('error-message');
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alias = aliasInput.value;
+            const password = passwordInput.value;
+
+            try {
+                const res = await fetch(`${API_BASE}/usuarios/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ali_usu: alias, cla_usu: password })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('userRole', data.user.nom_rol);
+                    window.location.href = 'seguridad.html';
+                } else {
+                    const errorData = await res.json();
+                    errorMessage.textContent = errorData.message || 'Error al iniciar sesión.';
+                }
+            } catch (error) {
+                errorMessage.textContent = 'Error de conexión con el servidor.';
+            }
+        });
+        return;
+    }
+
     // ====================================================================
+    // --- LÓGICA PARA EL PANEL DE ADMINISTRACIÓN (si la página es seguridad.html) ---
+    // ====================================================================
+
+    // Inicia la protección de la vista
+    protectAdminViews();
+
+    // Comprueba si el usuario tiene rol de administrador y el token está presente para continuar
+    if (getUserRole() !== 'Admin' || !getToken()) {
+        return;
+    }
+
+    // Función para realizar fetch con el token de autorización
+    async function authorizedFetch(url, options = {}) {
+        const token = getToken();
+        if (!options.headers) {
+            options.headers = {};
+        }
+        options.headers['Authorization'] = `Bearer ${token}`;
+        options.headers['Content-Type'] = 'application/json';
+        const res = await fetch(url, options);
+        if (res.status === 401 || res.status === 403) {
+            logout(); // Redirige a login si el token es inválido o el acceso es denegado
+            throw new Error('Sesión expirada o acceso denegado.');
+        }
+        return res;
+    }
+
     // --- NAVEGACIÓN PRINCIPAL ---
-    // ====================================================================
     const navLinks = {
         usuarios: document.getElementById('nav-usuarios'),
         roles: document.getElementById('nav-roles'),
@@ -54,7 +151,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (view === 'personas') cargarPersonas();
             if (view === 'ubicaciones') cargarUbicaciones();
             if (view === 'zonahoraria') cargarZonasHorarias();
-
         }
     }
 
@@ -82,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function cargarUsuarios() {
         renderLoadingState(user_table, 4);
         try {
-            const res = await fetch(user_api);
+            const res = await authorizedFetch(user_api);
             const data = await res.json();
             user_count.textContent = `${data.length} Usuarios`;
             user_table.innerHTML = ''; 
@@ -116,14 +212,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const metodo = id ? 'PUT' : 'POST';
         const url = id ? `${user_api}/${id}` : user_api;
         try {
-            await fetch(url, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(datos) });
+            await authorizedFetch(url, { method: metodo, body: JSON.stringify(datos) });
             user_resetForm();
             await cargarUsuarios();
         } catch (error) { alert('Error al guardar los datos.'); }
     });
 
     window.user_editar = async (id) => {
-        const res = await fetch(`${user_api}/${id}`);
+        const res = await authorizedFetch(`${user_api}/${id}`);
         const u = await res.json();
         user_cod_usu.value = u.cod_usu;
         user_ali_usu.value = u.ali_usu;
@@ -150,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.user_eliminar = async (id) => {
         if (confirm("¿Eliminar usuario?")) {
-            await fetch(`${user_api}/${id}`, { method: 'DELETE' });
+            await authorizedFetch(`${user_api}/${id}`, { method: 'DELETE' });
             await cargarUsuarios();
         }
     };
@@ -172,7 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function cargarRoles() {
         renderLoadingState(role_table, 4);
         try {
-            const res = await fetch(role_api);
+            const res = await authorizedFetch(role_api);
             if (!res.ok) throw new Error('Error de red al cargar los roles.');
             const data = await res.json();
             role_count.textContent = `${data.length} Roles`;
@@ -206,7 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const metodo = id ? 'PUT' : 'POST';
         const url = id ? `${role_api}/${id}` : role_api;
         try {
-            const res = await fetch(url, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(datos) });
+            const res = await authorizedFetch(url, { method: metodo, body: JSON.stringify(datos) });
             if (!res.ok) throw new Error('La operación de guardado falló.');
             role_resetForm();
             await cargarRoles();
@@ -215,7 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.role_editar = async function(id) {
         try {
-            const res = await fetch(`${role_api}/${id}`);
+            const res = await authorizedFetch(`${role_api}/${id}`);
             if (!res.ok) throw new Error('No se pudo encontrar el rol.');
             const r = await res.json();
             role_cod_rol.value = r.cod_rol;
@@ -240,7 +336,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.role_eliminar = async function(id) {
         if (confirm("¿Estás seguro de que quieres eliminar este rol?")) {
             try {
-                const res = await fetch(`${role_api}/${id}`, { method: 'DELETE' });
+                const res = await authorizedFetch(`${role_api}/${id}`, { method: 'DELETE' });
                 if (!res.ok) {
                     const errorData = await res.json();
                     throw new Error(errorData.message || 'Error al eliminar');
@@ -266,7 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function cargarPrivacidades() {
         renderLoadingState(privacidad_table, 3);
         try {
-            const res = await fetch(privacidad_api);
+            const res = await authorizedFetch(privacidad_api);
             if (!res.ok) throw new Error(`Error de red: ${res.status} ${res.statusText}`);
             const data = await res.json();
             privacidad_count.textContent = `${data.length} Tipos`;
@@ -298,7 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const metodo = id ? 'PUT' : 'POST';
         const url = id ? `${privacidad_api}/${id}` : privacidad_api;
         try {
-            const res = await fetch(url, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(datos) });
+            const res = await authorizedFetch(url, { method: metodo, body: JSON.stringify(datos) });
             if (!res.ok) throw new Error('La operación de guardado falló.');
             privacidad_resetForm();
             await cargarPrivacidades();
@@ -307,7 +403,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.privacidad_editar = async function(id) {
         try {
-            const res = await fetch(`${privacidad_api}/${id}`);
+            const res = await authorizedFetch(`${privacidad_api}/${id}`);
             if (!res.ok) throw new Error('No se pudo encontrar el tipo de privacidad.');
             const p = await res.json();
             privacidad_cod_tip.value = p.cod_tip;
@@ -331,7 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.privacidad_eliminar = async function(id) {
         if (confirm("¿Estás seguro de que quieres eliminar este tipo de privacidad?")) {
             try {
-                const res = await fetch(`${privacidad_api}/${id}`, { method: 'DELETE' });
+                const res = await authorizedFetch(`${privacidad_api}/${id}`, { method: 'DELETE' });
                 if (!res.ok) {
                     const errorData = await res.json();
                     throw new Error(errorData.message || 'Error al eliminar');
@@ -362,7 +458,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function cargarUsuariosParaSelect() {
         try {
-            const res = await fetch(user_api);
+            const res = await authorizedFetch(user_api);
             const usuarios = await res.json();
             persona_fky_usu.innerHTML = '<option value="">Seleccione un usuario...</option>';
             usuarios.forEach(u => {
@@ -377,7 +473,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await cargarUsuariosParaSelect();
         renderLoadingState(persona_table, 4);
         try {
-            const res = await fetch(persona_api);
+            const res = await authorizedFetch(persona_api);
             const data = await res.json();
             persona_count.textContent = `${data.length} Perfiles`;
             persona_table.innerHTML = ''; 
@@ -412,7 +508,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.persona_editar = async (id) => {
-        const res = await fetch(`${persona_api}/${id}`);
+        const res = await authorizedFetch(`${persona_api}/${id}`);
         const p = await res.json();
         persona_cod_per.value = p.cod_per;
         persona_fky_usu.value = p.fky_usu;
@@ -428,26 +524,26 @@ document.addEventListener('DOMContentLoaded', () => {
         persona_form_container.scrollIntoView({ behavior: 'smooth' });
     };
 
-window.persona_eliminar = async (id) => {
-    if (confirm("¿Eliminar perfil?")) {
-        try {
-            const res = await fetch(`${persona_api}/${id}`, { method: 'DELETE' });
+    window.persona_eliminar = async (id) => {
+        if (confirm("¿Eliminar perfil?")) {
+            try {
+                const res = await authorizedFetch(`${persona_api}/${id}`, { method: 'DELETE' });
 
-            if (!res.ok) {
-                
-                const errorData = await res.json();
-                throw new Error(errorData.message || 'Ocurrió un error desconocido.');
+                if (!res.ok) {
+                    
+                    const errorData = await res.json();
+                    throw new Error(errorData.message || 'Ocurrió un error desconocido.');
+                }
+
+            
+                await cargarPersonas();
+
+            } catch (error) {
+                console.error("Error al eliminar persona:", error);
+                alert(error.message);
             }
-
-        
-            await cargarPersonas();
-
-        } catch (error) {
-            console.error("Error al eliminar persona:", error);
-            alert(error.message);
         }
-    }
-};
+    };
     persona_form.addEventListener('submit', async e => {
         e.preventDefault();
         const id = persona_cod_per.value;
@@ -460,7 +556,7 @@ window.persona_eliminar = async (id) => {
         const metodo = id ? 'PUT' : 'POST';
         const url = id ? `${persona_api}/${id}` : persona_api;
         try {
-            await fetch(url, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(datos) });
+            await authorizedFetch(url, { method: metodo, body: JSON.stringify(datos) });
             persona_resetForm();
             await cargarPersonas();
         } catch (error) {
@@ -470,318 +566,318 @@ window.persona_eliminar = async (id) => {
 
 
 
-// ====================================================================
+    // ====================================================================
     // --- LÓGICA PARA UBICACIONES (CON ESTADOS Y CIUDADES) ---
     // ====================================================================
-const pais_api_ubicaciones = `${API_BASE}/paises`;
-const estado_api_ubicaciones = `${API_BASE}/estados`;
-const ciudad_api_ubicaciones = `${API_BASE}/ciudades`;
+    const pais_api_ubicaciones = `${API_BASE}/paises`;
+    const estado_api_ubicaciones = `${API_BASE}/estados`;
+    const ciudad_api_ubicaciones = `${API_BASE}/ciudades`;
 
-// Elementos generales
-const btnShowEstados = document.getElementById('btn-show-estados');
-const btnShowCiudades = document.getElementById('btn-show-ciudades');
-const subviewEstados = document.getElementById('subview-estados');
-const subviewCiudades = document.getElementById('subview-ciudades');
+    // Elementos generales
+    const btnShowEstados = document.getElementById('btn-show-estados');
+    const btnShowCiudades = document.getElementById('btn-show-ciudades');
+    const subviewEstados = document.getElementById('subview-estados');
+    const subviewCiudades = document.getElementById('subview-ciudades');
 
-// Elementos de la vista ESTADOS
-const paisSelectEstado = document.getElementById('pais-select-estado');
-const estadoForm = document.getElementById('form-estado');
-const estadoTable = document.getElementById('estado-table');
-const estadoCount = document.getElementById('estado-count');
-const estadoNomEst = document.getElementById('estado-nom_est');
+    // Elementos de la vista ESTADOS
+    const paisSelectEstado = document.getElementById('pais-select-estado');
+    const estadoForm = document.getElementById('form-estado');
+    const estadoTable = document.getElementById('estado-table');
+    const estadoCount = document.getElementById('estado-count');
+    const estadoNomEst = document.getElementById('estado-nom_est');
 
-// Elementos de la vista CIUDADES
-const paisSelectCiudad = document.getElementById('pais-select-ciudad');
-const estadoSelectCiudad = document.getElementById('estado-select-ciudad');
-const zonahorariaSelectCiudad = document.getElementById('zonahoraria-select-ciudad');
-const ciudadForm = document.getElementById('form-ciudad');
-const ciudadTable = document.getElementById('ciudad-table');
-const ciudadCount = document.getElementById('ciudad-count');
-const ciudadNomCiu = document.getElementById('ciudad-nom_ciu');
+    // Elementos de la vista CIUDADES
+    const paisSelectCiudad = document.getElementById('pais-select-ciudad');
+    const estadoSelectCiudad = document.getElementById('estado-select-ciudad');
+    const zonahorariaSelectCiudad = document.getElementById('zonahoraria-select-ciudad');
+    const ciudadForm = document.getElementById('form-ciudad');
+    const ciudadTable = document.getElementById('ciudad-table');
+    const ciudadCount = document.getElementById('ciudad-count');
+    const ciudadNomCiu = document.getElementById('ciudad-nom_ciu');
 
-// --- Lógica para cambiar entre sub-vistas ---
-btnShowEstados.addEventListener('click', () => {
-    subviewEstados.classList.remove('hidden');
-    subviewCiudades.classList.add('hidden');
-    btnShowEstados.classList.replace('btn-secondary', 'btn-primary');
-    btnShowCiudades.classList.replace('btn-primary', 'btn-secondary');
-});
-btnShowCiudades.addEventListener('click', () => {
-    subviewCiudades.classList.remove('hidden');
-    subviewEstados.classList.add('hidden');
-    btnShowCiudades.classList.replace('btn-secondary', 'btn-primary');
-    btnShowEstados.classList.replace('btn-primary', 'btn-secondary');
-});
+    // --- Lógica para cambiar entre sub-vistas ---
+    btnShowEstados.addEventListener('click', () => {
+        subviewEstados.classList.remove('hidden');
+        subviewCiudades.classList.add('hidden');
+        btnShowEstados.classList.replace('btn-secondary', 'btn-primary');
+        btnShowCiudades.classList.replace('btn-primary', 'btn-secondary');
+    });
+    btnShowCiudades.addEventListener('click', () => {
+        subviewCiudades.classList.remove('hidden');
+        subviewEstados.classList.add('hidden');
+        btnShowCiudades.classList.replace('btn-secondary', 'btn-primary');
+        btnShowEstados.classList.replace('btn-primary', 'btn-secondary');
+    });
 
-// --- Funciones reutilizables ---
-async function cargarPaisesEnSelect(selectElement) {
-    try {
-        const res = await fetch(pais_api_ubicaciones);
-        const paises = await res.json();
-        selectElement.innerHTML = '<option value="">Seleccione un país...</option>';
-        paises.forEach(pais => {
-            selectElement.innerHTML += `<option value="${pais.cod_pai}">${pais.nom_pai}</option>`;
-        });
-    } catch (error) {
-        selectElement.innerHTML = '<option value="">Error al cargar</option>';
-    }
-}
-
-// --- Lógica para la vista de ESTADOS ---
-async function cargarEstados(paisId) {
-    if (!paisId) {
-        renderEmptyState(estadoTable, 4, 'Seleccione un país para ver sus estados.');
-        estadoCount.textContent = '0 Estados';
-        return;
-    }
-    renderLoadingState(estadoTable, 4);
-    try {
-        const res = await fetch(`${estado_api_ubicaciones}/pais/${paisId}`);
-        const estados = await res.json();
-        estadoCount.textContent = `${estados.length} Estados`;
-        if (estados.length === 0) {
-            renderEmptyState(estadoTable, 4, 'Este país no tiene estados registrados.');
-            return;
-        }
-       
-        estadoTable.innerHTML = estados.map(e => `
-            <tr>
-                <td>${e.nom_est}</td>
-                <td>${e.nom_pai}</td> 
-                <td>${renderEstado(e.est_est)}</td>
-                <td class="actions">
-                    <button onclick="estado_eliminar('${e.cod_est}')" class="delete" title="Eliminar"><i class="fas fa-solid fa-trash"></i></button>
-                </td>
-            </tr>
-        `).join('');
-    } catch (error) {
-        estadoTable.innerHTML = `<tr><td colspan="4" class="table-state-cell">${error.message}</td></tr>`;
-    }
-}
-paisSelectEstado.addEventListener('change', () => cargarEstados(paisSelectEstado.value));
-estadoForm.addEventListener('submit', async e => {
-    e.preventDefault();
-    const datos = { nom_est: estadoNomEst.value, fky_pai: paisSelectEstado.value };
-    await fetch(estado_api_ubicaciones, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(datos) });
-    estadoNomEst.value = ''; // Solo limpiamos el input, no el select
-    await cargarEstados(datos.fky_pai);
-});
-window.estado_eliminar = async (id) => {
-    if (!confirm("¿Eliminar este estado?")) return;
-    const paisIdActual = paisSelectEstado.value;
-    await fetch(`${estado_api_ubicaciones}/${id}`, { method: 'DELETE' });
-    await cargarEstados(paisIdActual);
-};
-
-
-    // --- Lógica para la vista de CIUDADES ---
-    async function cargarZonasHorariasParaSelect() {
-    try {
-        const res = await fetch(zonahoraria_api);
-        const zonas = await res.json();
-        zonahorariaSelectCiudad.innerHTML = '<option value="">Seleccione zona horaria...</option>';
-        zonas.forEach(z => {
-            zonahorariaSelectCiudad.innerHTML += `<option value="${z.cod_zon}">${z.nom_zon} (${z.acr_zon})</option>`;
-        });
-    } catch (error) {
-        zonahorariaSelectCiudad.innerHTML = '<option value="">Error al cargar</option>';
-    }
-}
-
-async function cargarEstadosEnSelect(paisId) {
-    estadoSelectCiudad.innerHTML = '<option value="">Cargando estados...</option>';
-    if (!paisId) {
-        estadoSelectCiudad.innerHTML = '<option value="">Seleccione un país primero</option>';
-        return;
-    }
-    try {
-        const res = await fetch(`${estado_api_ubicaciones}/pais/${paisId}`);
-        const estados = await res.json();
-        estadoSelectCiudad.innerHTML = '<option value="">Seleccione un estado...</option>';
-        estados.forEach(estado => {
-            estadoSelectCiudad.innerHTML += `<option value="${estado.cod_est}">${estado.nom_est}</option>`;
-        });
-    } catch (error) {
-        estadoSelectCiudad.innerHTML = '<option value="">Error al cargar</option>';
-    }
-}
-
-async function cargarCiudades(estadoId) {
-    if (!estadoId) {
-        renderEmptyState(ciudadTable, 5, 'Seleccione un país y un estado para ver las ciudades.');
-        ciudadCount.textContent = '0 Ciudades';
-        return;
-    }
-    renderLoadingState(ciudadTable, 5);
-    try {
-        const res = await fetch(`${ciudad_api_ubicaciones}/estado/${estadoId}`);
-        const ciudades = await res.json();
-        ciudadCount.textContent = `${ciudades.length} Ciudades`;
-        if (ciudades.length === 0) {
-            renderEmptyState(ciudadTable, 5, 'Este estado no tiene ciudades registradas.');
-            return;
-        }
-        ciudadTable.innerHTML = ciudades.map(c => `
-            <tr>
-                <td>${c.nom_ciu}</td>
-                <td>${c.nom_est}</td>
-                <td>${c.nom_pai}</td>
-                <td>${c.nom_zon}</td>
-                <td class="actions">
-                    <button onclick="ciudad_eliminar('${c.cod_ciu}')" class="delete" title="Eliminar"><i class="fas fa-solid fa-trash"></i></button>
-                </td>
-            </tr>
-        `).join('');
-    } catch (error) {
-        ciudadTable.innerHTML = `<tr><td colspan="5" class="table-state-cell">${error.message}</td></tr>`;
-    }
-}
-paisSelectCiudad.addEventListener('change', () => {
-    cargarEstadosEnSelect(paisSelectCiudad.value);
-    cargarCiudades(null);
-});
-estadoSelectCiudad.addEventListener('change', () => cargarCiudades(estadoSelectCiudad.value));
-ciudadForm.addEventListener('submit', async e => {
-    e.preventDefault();
-    const datos = { 
-        nom_ciu: ciudadNomCiu.value, 
-        fky_est: estadoSelectCiudad.value,
-        fky_zon: zonahorariaSelectCiudad.value 
-    };
-    await fetch(ciudad_api_ubicaciones, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(datos) });
-    // No reseteamos los selects para mantener el contexto
-    ciudadNomCiu.value = ''; 
-    await cargarCiudades(datos.fky_est);
-});
-window.ciudad_eliminar = async (id) => {
-    if (!confirm("¿Eliminar esta ciudad?")) return;
-    const estadoIdActual = estadoSelectCiudad.value;
-    await fetch(`${ciudad_api_ubicaciones}/${id}`, { method: 'DELETE' });
-    await cargarCiudades(estadoIdActual);
-};
-
-// --- Función principal para esta vista ---
-async function cargarUbicaciones() {
-    await cargarPaisesEnSelect(paisSelectEstado);
-    await cargarPaisesEnSelect(paisSelectCiudad);
-    await cargarZonasHorariasParaSelect();
-    cargarEstados(null);
-    cargarCiudades(null);
-}
-
-// ====================================================================
-// --- LÓGICA PARA ZONAS HORARIAS (CÓDIGO COMPLETO) ---
-// ====================================================================
-const zonahoraria_api = `${API_BASE}/zonas-horarias`;
-const zonahoraria_form = document.getElementById('form-zonahoraria');
-const zonahoraria_form_container = document.getElementById('zonahoraria_form_container');
-const zonahoraria_table = document.getElementById('zonahoraria-table');
-const zonahoraria_count = document.getElementById('zonahoraria-count');
-
-// Campos del formulario
-const zonahoraria_cod_zon = document.getElementById('zonahoraria-cod_zon');
-const zonahoraria_nom_zon = document.getElementById('zonahoraria-nom_zon');
-const zonahoraria_acr_zon = document.getElementById('zonahoraria-acr_zon');
-const zonahoraria_dif_zon = document.getElementById('zonahoraria-dif_zon');
-const zonahoraria_est_zon = document.getElementById('zonahoraria-est_zon');
-
-// Elementos del formulario
-const zonahoraria_formTitle = document.getElementById('zonahoraria-form-title');
-const zonahoraria_saveButtonText = document.getElementById('zonahoraria-save-button-text');
-const zonahoraria_cancelButton = document.getElementById('zonahoraria-cancel-button');
-
-async function cargarZonasHorarias() {
-    renderLoadingState(zonahoraria_table, 5);
-    try {
-        const res = await fetch(zonahoraria_api);
-        const data = await res.json();
-        zonahoraria_count.textContent = `${data.length} Zonas`;
-        if (data.length === 0) {
-            renderEmptyState(zonahoraria_table, 5, 'No hay zonas horarias registradas.');
-            return;
-        }
-        zonahoraria_table.innerHTML = data.map(z => `
-            <tr>
-                <td>${z.nom_zon}</td>
-                <td>${z.acr_zon}</td>
-                <td>UTC ${z.dif_zon > 0 ? '+' : ''}${z.dif_zon}</td>
-                <td>${renderEstado(z.est_zon)}</td>
-                <td class="actions">
-                    <button onclick="zonahoraria_editar('${z.cod_zon}')" title="Editar"><i class="fa-solid fa-pencil"></i></button>
-                    <button onclick="zonahoraria_eliminar('${z.cod_zon}')" class="delete" title="Eliminar"><i class="fas fa-solid fa-trash"></i></button>
-                </td>
-            </tr>
-        `).join('');
-    } catch (error) {
-        zonahoraria_table.innerHTML = `<tr><td colspan="5" class="table-state-cell">${error.message}</td></tr>`;
-    }
-}
-
-zonahoraria_form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const id = zonahoraria_cod_zon.value;
-    const datos = {
-        nom_zon: zonahoraria_nom_zon.value,
-        acr_zon: zonahoraria_acr_zon.value,
-        dif_zon: zonahoraria_dif_zon.value,
-        est_zon: zonahoraria_est_zon.value
-    };
-    const metodo = id ? 'PUT' : 'POST';
-    const url = id ? `${zonahoraria_api}/${id}` : zonahoraria_api;
-    try {
-        const res = await fetch(url, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(datos) });
-        if (!res.ok) throw new Error('La operación de guardado falló.');
-        zonahoraria_resetForm();
-        await cargarZonasHorarias();
-    } catch (error) {
-        alert('Error al guardar la zona horaria.');
-    }
-});
-
-window.zonahoraria_editar = async function(id) {
-    try {
-        const res = await fetch(`${zonahoraria_api}/${id}`);
-        const z = await res.json();
-        zonahoraria_cod_zon.value = z.cod_zon;
-        zonahoraria_nom_zon.value = z.nom_zon;
-        zonahoraria_acr_zon.value = z.acr_zon;
-        zonahoraria_dif_zon.value = z.dif_zon;
-        zonahoraria_est_zon.value = z.est_zon;
-        
-        zonahoraria_formTitle.textContent = 'Editar Zona Horaria';
-        zonahoraria_saveButtonText.textContent = 'Actualizar';
-        zonahoraria_cancelButton.classList.remove('hidden');
-        zonahoraria_form_container.scrollIntoView({ behavior: 'smooth' });
-    } catch (error) {
-        alert('Error al cargar los datos para editar.');
-    }
-}
-
-window.zonahoraria_resetForm = function() {
-    zonahoraria_form.reset();
-    zonahoraria_cod_zon.value = '';
-    zonahoraria_formTitle.textContent = 'Añadir Nueva Zona Horaria';
-    zonahoraria_saveButtonText.textContent = 'Guardar';
-    zonahoraria_cancelButton.classList.add('hidden');
-}
-
-window.zonahoraria_eliminar = async function(id) {
-    if (confirm("¿Estás seguro de que quieres eliminar esta zona horaria?")) {
+    // --- Funciones reutilizables ---
+    async function cargarPaisesEnSelect(selectElement) {
         try {
-            const res = await fetch(`${zonahoraria_api}/${id}`, { method: 'DELETE' });
-            if (!res.ok) {
-                const errorData = await res.json();
-                throw new Error(errorData.message || 'No se pudo eliminar. Es posible que esté en uso.');
+            const res = await authorizedFetch(pais_api_ubicaciones);
+            const paises = await res.json();
+            selectElement.innerHTML = '<option value="">Seleccione un país...</option>';
+            paises.forEach(pais => {
+                selectElement.innerHTML += `<option value="${pais.cod_pai}">${pais.nom_pai}</option>`;
+            });
+        } catch (error) {
+            selectElement.innerHTML = '<option value="">Error al cargar</option>';
+        }
+    }
+
+    // --- Lógica para la vista de ESTADOS ---
+    async function cargarEstados(paisId) {
+        if (!paisId) {
+            renderEmptyState(estadoTable, 4, 'Seleccione un país para ver sus estados.');
+            estadoCount.textContent = '0 Estados';
+            return;
+        }
+        renderLoadingState(estadoTable, 4);
+        try {
+            const res = await authorizedFetch(`${estado_api_ubicaciones}/pais/${paisId}`);
+            const estados = await res.json();
+            estadoCount.textContent = `${estados.length} Estados`;
+            if (estados.length === 0) {
+                renderEmptyState(estadoTable, 4, 'Este país no tiene estados registrados.');
+                return;
             }
+        
+            estadoTable.innerHTML = estados.map(e => `
+                <tr>
+                    <td>${e.nom_est}</td>
+                    <td>${e.nom_pai}</td> 
+                    <td>${renderEstado(e.est_est)}</td>
+                    <td class="actions">
+                        <button onclick="estado_eliminar('${e.cod_est}')" class="delete" title="Eliminar"><i class="fas fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        } catch (error) {
+            estadoTable.innerHTML = `<tr><td colspan="4" class="table-state-cell">${error.message}</td></tr>`;
+        }
+    }
+    paisSelectEstado.addEventListener('change', () => cargarEstados(paisSelectEstado.value));
+    estadoForm.addEventListener('submit', async e => {
+        e.preventDefault();
+        const datos = { nom_est: estadoNomEst.value, fky_pai: paisSelectEstado.value };
+        await authorizedFetch(estado_api_ubicaciones, { method: 'POST', body: JSON.stringify(datos) });
+        estadoNomEst.value = ''; // Solo limpiamos el input, no el select
+        await cargarEstados(datos.fky_pai);
+    });
+    window.estado_eliminar = async (id) => {
+        if (!confirm("¿Eliminar este estado?")) return;
+        const paisIdActual = paisSelectEstado.value;
+        await authorizedFetch(`${estado_api_ubicaciones}/${id}`, { method: 'DELETE' });
+        await cargarEstados(paisIdActual);
+    };
+
+
+        // --- Lógica para la vista de CIUDADES ---
+        async function cargarZonasHorariasParaSelect() {
+        try {
+            const res = await authorizedFetch(zonahoraria_api);
+            const zonas = await res.json();
+            zonahorariaSelectCiudad.innerHTML = '<option value="">Seleccione zona horaria...</option>';
+            zonas.forEach(z => {
+                zonahorariaSelectCiudad.innerHTML += `<option value="${z.cod_zon}">${z.nom_zon} (${z.acr_zon})</option>`;
+            });
+        } catch (error) {
+            zonahorariaSelectCiudad.innerHTML = '<option value="">Error al cargar</option>';
+        }
+    }
+
+    async function cargarEstadosEnSelect(paisId) {
+        estadoSelectCiudad.innerHTML = '<option value="">Cargando estados...</option>';
+        if (!paisId) {
+            estadoSelectCiudad.innerHTML = '<option value="">Seleccione un país primero</option>';
+            return;
+        }
+        try {
+            const res = await authorizedFetch(`${estado_api_ubicaciones}/pais/${paisId}`);
+            const estados = await res.json();
+            estadoSelectCiudad.innerHTML = '<option value="">Seleccione un estado...</option>';
+            estados.forEach(estado => {
+                estadoSelectCiudad.innerHTML += `<option value="${estado.cod_est}">${estado.nom_est}</option>`;
+            });
+        } catch (error) {
+            estadoSelectCiudad.innerHTML = '<option value="">Error al cargar</option>';
+        }
+    }
+
+    async function cargarCiudades(estadoId) {
+        if (!estadoId) {
+            renderEmptyState(ciudadTable, 5, 'Seleccione un país y un estado para ver las ciudades.');
+            ciudadCount.textContent = '0 Ciudades';
+            return;
+        }
+        renderLoadingState(ciudadTable, 5);
+        try {
+            const res = await authorizedFetch(`${ciudad_api_ubicaciones}/estado/${estadoId}`);
+            const ciudades = await res.json();
+            ciudadCount.textContent = `${ciudades.length} Ciudades`;
+            if (ciudades.length === 0) {
+                renderEmptyState(ciudadTable, 5, 'Este estado no tiene ciudades registradas.');
+                return;
+            }
+            ciudadTable.innerHTML = ciudades.map(c => `
+                <tr>
+                    <td>${c.nom_ciu}</td>
+                    <td>${c.nom_est}</td>
+                    <td>${c.nom_pai}</td>
+                    <td>${c.nom_zon}</td>
+                    <td class="actions">
+                        <button onclick="ciudad_eliminar('${c.cod_ciu}')" class="delete" title="Eliminar"><i class="fas fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        } catch (error) {
+            ciudadTable.innerHTML = `<tr><td colspan="5" class="table-state-cell">${error.message}</td></tr>`;
+        }
+    }
+    paisSelectCiudad.addEventListener('change', () => {
+        cargarEstadosEnSelect(paisSelectCiudad.value);
+        cargarCiudades(null);
+    });
+    estadoSelectCiudad.addEventListener('change', () => cargarCiudades(estadoSelectCiudad.value));
+    ciudadForm.addEventListener('submit', async e => {
+        e.preventDefault();
+        const datos = { 
+            nom_ciu: ciudadNomCiu.value, 
+            fky_est: estadoSelectCiudad.value,
+            fky_zon: zonahorariaSelectCiudad.value 
+        };
+        await authorizedFetch(ciudad_api_ubicaciones, { method: 'POST', body: JSON.stringify(datos) });
+        // No reseteamos los selects para mantener el contexto
+        ciudadNomCiu.value = ''; 
+        await cargarCiudades(datos.fky_est);
+    });
+    window.ciudad_eliminar = async (id) => {
+        if (!confirm("¿Eliminar esta ciudad?")) return;
+        const estadoIdActual = estadoSelectCiudad.value;
+        await authorizedFetch(`${ciudad_api_ubicaciones}/${id}`, { method: 'DELETE' });
+        await cargarCiudades(estadoIdActual);
+    };
+
+    // --- Función principal para esta vista ---
+    async function cargarUbicaciones() {
+        await cargarPaisesEnSelect(paisSelectEstado);
+        await cargarPaisesEnSelect(paisSelectCiudad);
+        await cargarZonasHorariasParaSelect();
+        cargarEstados(null);
+        cargarCiudades(null);
+    }
+
+    // ====================================================================
+    // --- LÓGICA PARA ZONAS HORARIAS (CÓDIGO COMPLETO) ---
+    // ====================================================================
+    const zonahoraria_api = `${API_BASE}/zonas-horarias`;
+    const zonahoraria_form = document.getElementById('form-zonahoraria');
+    const zonahoraria_form_container = document.getElementById('zonahoraria_form_container');
+    const zonahoraria_table = document.getElementById('zonahoraria-table');
+    const zonahoraria_count = document.getElementById('zonahoraria-count');
+
+    // Campos del formulario
+    const zonahoraria_cod_zon = document.getElementById('zonahoraria-cod_zon');
+    const zonahoraria_nom_zon = document.getElementById('zonahoraria-nom_zon');
+    const zonahoraria_acr_zon = document.getElementById('zonahoraria-acr_zon');
+    const zonahoraria_dif_zon = document.getElementById('zonahoraria-dif_zon');
+    const zonahoraria_est_zon = document.getElementById('zonahoraria-est_zon');
+
+    // Elementos del formulario
+    const zonahoraria_formTitle = document.getElementById('zonahoraria-form-title');
+    const zonahoraria_saveButtonText = document.getElementById('zonahoraria-save-button-text');
+    const zonahoraria_cancelButton = document.getElementById('zonahoraria-cancel-button');
+
+    async function cargarZonasHorarias() {
+        renderLoadingState(zonahoraria_table, 5);
+        try {
+            const res = await authorizedFetch(zonahoraria_api);
+            const data = await res.json();
+            zonahoraria_count.textContent = `${data.length} Zonas`;
+            if (data.length === 0) {
+                renderEmptyState(zonahoraria_table, 5, 'No hay zonas horarias registradas.');
+                return;
+            }
+            zonahoraria_table.innerHTML = data.map(z => `
+                <tr>
+                    <td>${z.nom_zon}</td>
+                    <td>${z.acr_zon}</td>
+                    <td>UTC ${z.dif_zon > 0 ? '+' : ''}${z.dif_zon}</td>
+                    <td>${renderEstado(z.est_zon)}</td>
+                    <td class="actions">
+                        <button onclick="zonahoraria_editar('${z.cod_zon}')" title="Editar"><i class="fa-solid fa-pencil"></i></button>
+                        <button onclick="zonahoraria_eliminar('${z.cod_zon}')" class="delete" title="Eliminar"><i class="fas fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        } catch (error) {
+            zonahoraria_table.innerHTML = `<tr><td colspan="5" class="table-state-cell">${error.message}</td></tr>`;
+        }
+    }
+
+    zonahoraria_form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const id = zonahoraria_cod_zon.value;
+        const datos = {
+            nom_zon: zonahoraria_nom_zon.value,
+            acr_zon: zonahoraria_acr_zon.value,
+            dif_zon: zonahoraria_dif_zon.value,
+            est_zon: zonahoraria_est_zon.value
+        };
+        const metodo = id ? 'PUT' : 'POST';
+        const url = id ? `${zonahoraria_api}/${id}` : zonahoraria_api;
+        try {
+            const res = await authorizedFetch(url, { method: metodo, body: JSON.stringify(datos) });
+            if (!res.ok) throw new Error('La operación de guardado falló.');
+            zonahoraria_resetForm();
             await cargarZonasHorarias();
         } catch (error) {
-            alert(error.message);
+            alert('Error al guardar la zona horaria.');
+        }
+    });
+
+    window.zonahoraria_editar = async function(id) {
+        try {
+            const res = await authorizedFetch(`${zonahoraria_api}/${id}`);
+            const z = await res.json();
+            zonahoraria_cod_zon.value = z.cod_zon;
+            zonahoraria_nom_zon.value = z.nom_zon;
+            zonahoraria_acr_zon.value = z.acr_zon;
+            zonahoraria_dif_zon.value = z.dif_zon;
+            zonahoraria_est_zon.value = z.est_zon;
+            
+            zonahoraria_formTitle.textContent = 'Editar Zona Horaria';
+            zonahoraria_saveButtonText.textContent = 'Actualizar';
+            zonahoraria_cancelButton.classList.remove('hidden');
+            zonahoraria_form_container.scrollIntoView({ behavior: 'smooth' });
+        } catch (error) {
+            alert('Error al cargar los datos para editar.');
         }
     }
-}
+
+    window.zonahoraria_resetForm = function() {
+        zonahoraria_form.reset();
+        zonahoraria_cod_zon.value = '';
+        zonahoraria_formTitle.textContent = 'Añadir Nueva Zona Horaria';
+        zonahoraria_saveButtonText.textContent = 'Guardar';
+        zonahoraria_cancelButton.classList.add('hidden');
+    }
+
+    window.zonahoraria_eliminar = async function(id) {
+        if (confirm("¿Estás seguro de que quieres eliminar esta zona horaria?")) {
+            try {
+                const res = await authorizedFetch(`${zonahoraria_api}/${id}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.message || 'No se pudo eliminar. Es posible que esté en uso.');
+                }
+                await cargarZonasHorarias();
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+    }
 
 
-    
+        
     // --- INICIALIZACIÓN ---
     navigateTo('usuarios');
 });

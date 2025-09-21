@@ -345,3 +345,83 @@ td.actions button.delete:hover {
 .table-state-cell .fa-spinner {
     color: var(--teeker-purple);
 }
+
+
+/* ==================================================================== */
+/* --- ESTILOS PARA LA PÁGINA DE INICIO DE SESIÓN --- */
+/* ==================================================================== */
+body.login-body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background-color: #f0f2f5;
+    margin: 0;
+}
+
+.login-container {
+    background-color: white;
+    padding: 2.5rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+    transition: transform 0.3s ease;
+}
+
+.login-container:hover {
+    transform: translateY(-5px);
+}
+
+.login-container h1 {
+    color: #333;
+    margin-bottom: 2rem;
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.login-form input {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 1.5rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    box-sizing: border-box;
+    font-size: 1rem;
+    transition: border-color 0.3s;
+}
+
+.login-form input:focus {
+    border-color: #007bff;
+    outline: none;
+}
+
+.login-form button {
+    width: 100%;
+    padding: 12px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.3s, transform 0.1s;
+}
+
+.login-form button:hover {
+    background-color: #0056b3;
+}
+
+.login-form button:active {
+    transform: scale(0.99);
+}
+
+#error-message {
+    color: #dc3545;
+    margin-top: 1.5rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    min-height: 20px;
+}

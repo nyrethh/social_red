@@ -53,13 +53,13 @@ export const putUsuario = async (req, res) => {
     let query;
     let params;
 
-    // Verificamos si el usuario envió una nueva contraseña en la petición
+    // Verificacion si la clave (cla_usu) viene en la solicitud
     if (cla_usu) {
-        // Si SÍ hay contraseña nueva, la consulta la incluye
+        // Ssi hay contraseña nueva, entonces se atuliza
         query = 'UPDATE seguridad.usuario SET ali_usu = $1, ema_usu = $2, est_usu = $3, cla_usu = $4 WHERE cod_usu = $5 RETURNING *';
         params = [ali_usu, ema_usu, est_usu, cla_usu, id];
     } else {
-        // Si NO hay contraseña nueva, la consulta la omite para no sobreescribirla
+        // aqui es si no hay contraseña nueva, entonces no la actualizamos
         query = 'UPDATE seguridad.usuario SET ali_usu = $1, ema_usu = $2, est_usu = $3 WHERE cod_usu = $4 RETURNING *';
         params = [ali_usu, ema_usu, est_usu, id];
     }
@@ -107,6 +107,57 @@ export const deleteUsuario = async (req, res) => {
         }
 
         console.error("Error al eliminar usuario:", error);
+        return res.status(500).json({ message: "Error interno del servidor" });
+    }
+};
+
+
+/* Lógica de inicio de sesión */
+/* export const login = async (req, res) => {
+    const { ali_usu, cla_usu } = req.body;
+    try {
+        const { rows } = await Pool.query(
+            "SELECT * FROM seguridad.usuario WHERE ali_usu = $1 AND cla_usu = $2 AND est_usu = 'A'",
+            [ali_usu, cla_usu]
+        );
+        if (rows.length === 0) {
+            return res.status(401).json({ message: "Credenciales incorrectas o usuario inactivo." });
+        }
+        res.json({ message: "Inicio de sesión exitoso", user: rows[0] });
+    } catch (error) {
+        console.error("Error en la autenticación:", error);
+        return res.status(500).json({ message: "Error interno del servidor" });
+    }
+}; */
+
+// TOKEN
+import jwt from 'jsonwebtoken';
+
+const JWT_SECRET = process.env.JWT_SECRET;
+
+
+export const login = async (req, res) => {
+    const { ali_usu, cla_usu } = req.body;
+    try {
+        const { rows } = await Pool.query(
+            "SELECT u.*, r.nom_rol FROM seguridad.usuario u JOIN seguridad.rol r ON u.fky_rol = r.cod_rol WHERE u.ali_usu = $1 AND u.cla_usu = $2 AND u.est_usu = 'A'",
+            [ali_usu, cla_usu]
+        );
+        if (rows.length === 0) {
+            return res.status(401).json({ message: "Credenciales incorrectas o usuario inactivo." });
+        }
+        
+        const user = rows[0];
+        // Crea el token con la información del usuario
+        const token = jwt.sign({ 
+            cod_usu: user.cod_usu,
+            ali_usu: user.ali_usu,
+            nom_rol: user.nom_rol // Se incluye el nombre del rol en el token
+        }, JWT_SECRET, { expiresIn: '1h' }); // El token expira en 1 hora
+
+        res.json({ message: "Inicio de sesión exitoso", token, user: { ali_usu: user.ali_usu, nom_rol: user.nom_rol } });
+    } catch (error) {
+        console.error("Error en la autenticación:", error);
         return res.status(500).json({ message: "Error interno del servidor" });
     }
 };
